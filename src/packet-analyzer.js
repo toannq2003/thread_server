@@ -336,146 +336,234 @@ class PacketAnalyzer {
   // --- 6Lowpan ---
   analyze6Lowpan(buffer, offset) {
     let pos = offset;
-    if (buffer.length <= pos + 2) return null;
+    if (buffer.length <= pos) return null;
     const dispatch = buffer[pos];
-    if ((dispatch & 0xe0) !== 0x60) return null; // Chỉ phân tích IPHC
 
-    const iphc = buffer.readUInt16BE(pos);
-    const tf = (iphc >> 11) & 0x03;
-    const nh = (iphc >> 10) & 0x01;
-    const hlim = (iphc >> 8) & 0x03;
-    const cid = (iphc >> 7) & 0x01;
-    const sac = (iphc >> 6) & 0x01;
-    const sam = (iphc >> 4) & 0x03;
-    const m = (iphc >> 3) & 0x01;
-    const dac = (iphc >> 2) & 0x01;
-    const dam = iphc & 0x03;
+    // 1. Mesh Header (10xxxxxx)
+    if ((dispatch & 0xC0) === 0x80) {
+        const hopsLeft = dispatch & 0x0F;
+        if (buffer.length < pos + 1 + 2 + 2) return null;
+        const originatorAddr = buffer.subarray(pos + 1, pos + 3);
+        const finalAddr = buffer.subarray(pos + 3, pos + 5);
 
-    const layer = {
-      name: "6Lowpan",
-      totalBytes: 2,
-      expanded: true,
-      fields: [],
-    };
-    layer.fields.push({
-      name: "IPHC Base Encoding",
-      value: `0x${iphc.toString(16).padStart(4, "0").toUpperCase()}`,
-      subfields: [
-        { name: "Traffic and Flow", value: tf },
-        { name: "Next Header", value: nh },
-        { name: "Hop Limit", value: hlim },
-        { name: "Context ID", value: cid },
-        { name: "Source Compression", value: sac },
-        { name: "Source Address Mode", value: sam },
-        { name: "Multicast Compression", value: m },
-        { name: "Destination Compression", value: dac },
-        { name: "Destination Address Mode", value: dam },
-      ],
-    });
-    pos += 2;
+        // Hiển thị nhị phân dispatch byte chia nhóm 4 bit
+        const dispatchBin = dispatch.toString(2).padStart(8, '0');
+        const dispatchBinGrouped = dispatchBin.replace(/(.{4})/g, '$1 ').trim();
 
-    // Context ID Field
-    if (cid === 1) {
-      layer.fields.push({
-        name: "Context ID Field",
-        value: `0x${buffer[pos].toString(16).padStart(2, "0").toUpperCase()}`,
-      });
-      pos += 1;
-      layer.totalBytes += 1;
+        return {
+            name: '6lowpan',
+            totalBytes: 5,
+            fields: [
+                {
+                    name: 'Dispatch Byte',
+                    type: 'expandable',
+                    value: `0x${dispatch.toString(16).padStart(2, '0').toUpperCase()}`,
+                    binaryDisplay: dispatchBinGrouped,
+                    subfields: [
+                        {
+                            name: 'Hops Left',
+                            value: `0x${hopsLeft.toString(16).toUpperCase()}`,
+                            description: `${parseInt(dispatchBin.slice(4, 8), 2)}`
+                        }
+                    ]
+                },
+                { name: 'Originator Address', value: originatorAddr.toString('hex').toUpperCase() },
+                { name: 'Final Address', value: finalAddr.toString('hex').toUpperCase() }
+            ]
+        };
     }
 
-    // Traffic and Flow Field (đúng chuẩn RFC 6282)
-    if (tf === 0 && buffer.length >= pos + 4) {
-      layer.fields.push({
-        name: "Traffic and Flow Field",
-        value: buffer
-          .subarray(pos, pos + 4)
-          .toString("hex")
-          .toUpperCase(),
-      });
-      pos += 4;
-      layer.totalBytes += 4;
-    } else if (tf === 1 && buffer.length >= pos + 1) {
-      layer.fields.push({
-        name: "Traffic and Flow Field",
-        value: buffer[pos].toString(16).padStart(2, "0").toUpperCase(),
-      });
-      pos += 1;
-      layer.totalBytes += 1;
-    } else if (tf === 2 && buffer.length >= pos + 3) {
-      layer.fields.push({
-        name: "Traffic and Flow Field",
-        value: buffer
-          .subarray(pos, pos + 3)
-          .toString("hex")
-          .toUpperCase(),
-      });
-      pos += 3;
-      layer.totalBytes += 3;
+
+    // 2. Fragmentation Header (11xxxxxx)
+    // Fragmentation Header: FRAG1 (11000xxx, 0xC0–0xDF)
+    if ((dispatch & 0xF8) === 0xC0 && buffer.length >= pos + 4) {
+        const fragCtrl = (dispatch << 8) | buffer[pos + 1];
+        const fragCtrlBin = fragCtrl.toString(2).padStart(16, '0');
+        const fragCtrlBinGrouped = fragCtrlBin.replace(/(.{4})/g, '$1 ').trim();
+        const fragmentType = (fragCtrl >> 13) & 0x7;
+        const fragmentTypeDesc = fragmentType === 6 ? 'First fragment (24)' : 'Unknown';
+        const datagramSize = fragCtrl & 0x1FFF;
+        const datagramTag = (buffer[pos + 2] << 8) | buffer[pos + 3];
+
+        return {
+            name: '6lowpan',
+            totalBytes: 4,
+            fields: [
+                {
+                    name: 'Fragment Control',
+                    type: 'expandable',
+                    value: `0x${fragCtrl.toString(16).toUpperCase()}`,
+                    binaryDisplay: fragCtrlBinGrouped,
+                    subfields: [
+                        { name: 'Fragment Type', value: fragmentType, description: fragmentTypeDesc },
+                        { name: 'Datagram Size', value: datagramSize }
+                    ]
+                },
+                { name: 'Datagram Tag', value: `0x${datagramTag.toString(16).toUpperCase()}` }
+            ]
+        };
     }
 
-    // Source Address (nếu có)
-    if (sam !== 3) {
-      let srcLen = 0;
-      if (sam === 0) srcLen = 16;
-      else if (sam === 1) srcLen = 8;
-      else if (sam === 2) srcLen = 2;
-      if (buffer.length >= pos + srcLen) {
-        layer.fields.push({
-          name: "Source Address",
-          value: buffer
-            .subarray(pos, pos + srcLen)
-            .toString("hex")
-            .toUpperCase(),
-        });
-        pos += srcLen;
-        layer.totalBytes += srcLen;
-      }
+    // Fragmentation Header: FRAGN (11100xxx, 0xE0–0xFF)
+    if ((dispatch & 0xF8) === 0xE0 && buffer.length >= pos + 5) {
+        const fragCtrl = (dispatch << 8) | buffer[pos + 1];
+        const fragCtrlBin = fragCtrl.toString(2).padStart(16, '0');
+        const fragCtrlBinGrouped = fragCtrlBin.replace(/(.{4})/g, '$1 ').trim();
+        const fragmentType = (fragCtrl >> 13) & 0x7;
+        const fragmentTypeDesc = fragmentType === 7 ? 'Next fragment (28)' : 'Unknown';
+        const datagramSize = fragCtrl & 0x1FFF;
+        const datagramTag = (buffer[pos + 2] << 8) | buffer[pos + 3];
+        const datagramOffset = buffer[pos + 4];
+
+        return {
+            name: '6lowpan',
+            totalBytes: 5,
+            fields: [
+                {
+                    name: 'Fragment Control',
+                    type: 'expandable',
+                    value: `0x${fragCtrl.toString(16).toUpperCase()}`,
+                    binaryDisplay: fragCtrlBinGrouped,
+                    subfields: [
+                        { name: 'Fragment Type', value: fragmentType, description: fragmentTypeDesc },
+                        { name: 'Datagram Size', value: datagramSize }
+                    ]
+                },
+                { name: 'Datagram Tag', value: `0x${datagramTag.toString(16).toUpperCase()}` },
+                { name: 'Datagram Offset', value: datagramOffset }
+            ]
+        };
     }
 
-    // Destination Address (nếu có)
-    if (m === 0) {
-      // Unicast
-      if (dam !== 3) {
-        let destLen = 0;
-        if (dam === 0) destLen = 16;
-        else if (dam === 1) destLen = 8;
-        else if (dam === 2) destLen = 2;
-        if (buffer.length >= pos + destLen) {
-          layer.fields.push({
-            name: "Destination Address",
-            value: buffer
-              .subarray(pos, pos + destLen)
-              .toString("hex")
-              .toUpperCase(),
-          });
-          pos += destLen;
-          layer.totalBytes += destLen;
+
+    // 3. IPHC (011xxxxx, 0x60–0x7F)
+    if ((dispatch & 0xE0) === 0x60 && buffer.length >= pos + 2) {
+        const iphc = buffer.readUInt16BE(pos);
+        const tf = (iphc >> 11) & 0x03;
+        const nh = (iphc >> 10) & 0x01;
+        const hlim = (iphc >> 8) & 0x03;
+        const cid = (iphc >> 7) & 0x01;
+        const sac = (iphc >> 6) & 0x01;
+        const sam = (iphc >> 4) & 0x03;
+        const m = (iphc >> 3) & 0x01;
+        const dac = (iphc >> 2) & 0x01;
+        const dam = iphc & 0x03;
+
+        let fields = [{
+            name: 'IPHC Base Encoding',
+            type: 'expandable',
+            value: `0x${iphc.toString(16).padStart(4, '0').toUpperCase()}`,
+            subfields: [
+                { name: 'Traffic and Flow', value: tf },
+                { name: 'Next Header', value: nh },
+                { name: 'Hop Limit', value: hlim },
+                { name: 'Context ID', value: cid },
+                { name: 'Source Compression', value: sac },
+                { name: 'Source Address Mode', value: sam },
+                { name: 'Multicast Compression', value: m },
+                { name: 'Destination Compression', value: dac },
+                { name: 'Destination Address Mode', value: dam }
+            ]
+        }];
+        pos += 2;
+
+        if (cid === 1) {
+            if (buffer.length < pos + 1) return null;
+            fields.push({ name: 'Context ID Field', value: `0x${buffer[pos].toString(16).padStart(2, '0').toUpperCase()}` });
+            pos += 1;
         }
-      }
-    } else {
-      // Multicast
-      let destLen = 0;
-      if (dam === 0) destLen = 16;
-      else if (dam === 1) destLen = 6;
-      else if (dam === 2) destLen = 4;
-      else if (dam === 3) destLen = 1;
-      if (buffer.length >= pos + destLen) {
-        layer.fields.push({
-          name: "Destination Address",
-          value: buffer
-            .subarray(pos, pos + destLen)
-            .toString("hex")
-            .toUpperCase(),
-        });
-        pos += destLen;
-        layer.totalBytes += destLen;
-      }
+        if (tf === 0) {
+            if (buffer.length < pos + 4) return null;
+            fields.push({ name: 'Traffic and Flow Field', value: buffer.subarray(pos, pos + 4).toString('hex').toUpperCase() });
+            pos += 4;
+        } else if (tf === 1) {
+            if (buffer.length < pos + 1) return null;
+            fields.push({ name: 'Traffic and Flow Field', value: buffer[pos].toString(16).padStart(2, '0').toUpperCase() });
+            pos += 1;
+        } else if (tf === 2) {
+            if (buffer.length < pos + 3) return null;
+            fields.push({ name: 'Traffic and Flow Field', value: buffer.subarray(pos, pos + 3).toString('hex').toUpperCase() });
+            pos += 3;
+        }
+        if (sam !== 3) {
+            const srcLen = { 0: 16, 1: 8, 2: 2 }[sam] || 0;
+            if (buffer.length < pos + srcLen) return null;
+            fields.push({ name: 'Source Address', value: buffer.subarray(pos, pos + srcLen).toString('hex').toUpperCase() });
+            pos += srcLen;
+        }
+        if (m === 0) {
+            if (dam !== 3) {
+                const destLen = { 0: 16, 1: 8, 2: 2 }[dam] || 0;
+                if (buffer.length < pos + destLen) return null;
+                fields.push({ name: 'Destination Address', value: buffer.subarray(pos, pos + destLen).toString('hex').toUpperCase() });
+                pos += destLen;
+            }
+        } else {
+            const destLen = { 0: 16, 1: 6, 2: 4, 3: 1 }[dam] || 0;
+            if (buffer.length < pos + destLen) return null;
+            fields.push({ name: 'Destination Address', value: buffer.subarray(pos, pos + destLen).toString('hex').toUpperCase() });
+            pos += destLen;
+        }
+        return { name: '6lowpan', totalBytes: pos - offset, fields };
     }
 
-    layer.totalBytes = pos - offset;
-    return layer;
-  }
+    // 4. ESC (Extension Dispatch, RFC 8066)
+    if ((dispatch === 0x7E || dispatch === 0x7F) && buffer.length >= pos + 2) {
+        const escType = buffer[pos + 1];
+        return {
+            name: '6lowpan',
+            totalBytes: 2,
+            fields: [
+                { name: 'Dispatch Byte', value: `0x${dispatch.toString(16).padStart(2, '0').toUpperCase()}`, description: 'ESC (Extension Dispatch)' },
+                { name: 'ESC Extension Type', value: `0x${escType.toString(16).padStart(2, '0').toUpperCase()}` }
+            ]
+        };
+    }
+
+    // 5. IPv6 uncompressed (0x41), HC1 (0x42), BC0 (0x50)
+    if (dispatch === 0x41) {
+        return {
+            name: '6lowpan',
+            totalBytes: 1,
+            fields: [
+                { name: 'Dispatch Byte', value: '0x41', description: 'IPv6 Uncompressed' }
+            ]
+        };
+    }
+    if (dispatch === 0x42) {
+        return {
+            name: '6lowpan',
+            totalBytes: 1,
+            fields: [
+                { name: 'Dispatch Byte', value: '0x42', description: 'LOWPAN_HC1 (deprecated)' }
+            ]
+        };
+    }
+    if (dispatch === 0x50) {
+        return {
+            name: '6lowpan',
+            totalBytes: 1,
+            fields: [
+                { name: 'Dispatch Byte', value: '0x50', description: 'LOWPAN_BC0 (Broadcast)' }
+            ]
+        };
+    }
+
+    // 6. Paging Dispatch (RFC 8025)
+    if ((dispatch & 0xF0) === 0xF0) {
+        return {
+            name: '6lowpan',
+            totalBytes: 1,
+            fields: [
+                { name: 'Dispatch Byte', value: `0x${dispatch.toString(16).padStart(2, '0').toUpperCase()}`, description: 'Paging Dispatch (RFC 8025)' }
+            ]
+        };
+    }
+
+    
+    return null;
+}
+
 
   // --- Lowpan UDP ---
   analyzeLowpanUDP(buffer, offset) {
