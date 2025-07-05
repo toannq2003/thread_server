@@ -64,7 +64,7 @@ io.on('connection', socket => {
     socket.on('requestKitList', async () => {
         try {
             const kits = await getAllKits();
-            console.log(`hello`);
+            
             socket.emit('kitList', kits);
         } catch (error) {
             console.error('Lỗi khi lấy danh sách kit:', error);

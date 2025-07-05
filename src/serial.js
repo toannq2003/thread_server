@@ -215,7 +215,7 @@ async function connectToPort(path, io, clientComPorts) {
 
                 // Thêm thông tin RX nếu là frame RX
                 if (state === "binary_rx") {
-                    console.log(`hello567890`);
+                    
                   let crcPassed = frameData[4 + packetLength + 15] === 1;
                   let rssi = frameData[4 + packetLength + 16];
                   let lqi = frameData[4 + packetLength + 17];

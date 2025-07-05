@@ -1164,7 +1164,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function addPacketToTable(packet) {
             if (!packet) return;
 
-            console.log(`crc_passed: ${packet.crc_passed}`);
+            // console.log(`crc_passed: ${packet.crc_passed}`);
             
             const tbody = document.getElementById('packetTableBody');
             const row = document.createElement('tr');
@@ -3082,7 +3082,7 @@ class VirtualScroll {
 
       // Thêm method này vào class VirtualScroll
 addRealtimeData(newPacket) {
-    console.log("Adding realtime packet:", newPacket);
+    // console.log("Adding realtime packet:", newPacket);
     
     // Thêm vào đầu data array
     this.data.unshift(newPacket);
@@ -3147,7 +3147,6 @@ addfilersData() {
         this.updateFilterStats();
         this.updateViewport();
         this.render();
-        console.log(`Đã render`);
     }
     
     updateFilterStats() {
@@ -3224,10 +3223,10 @@ addfilersData() {
     
     const errorCodeText = getErrorCodeText(packet.type, packet.errorCode || 0);
     const isSuccess = errorCodeText === 'Success';
-    if (packet.type === 'RX')
-    {
-        console.log(`crc_passed ${packet.crc_passed}, crcPassed ${packet.crcPassed}`);
-    }
+    // if (packet.type === 'RX')
+    // {
+    //     console.log(`crc_passed ${packet.crc_passed}, crcPassed ${packet.crcPassed}`);
+    // }
     
     // CRC display cho RX packets
     const crcDisplay = packet.type === 'RX' && packet.crcPassed !== null ? 
@@ -3326,7 +3325,7 @@ function updatePacketTable(data) {
 function addPacketToTable(packet) {
   if (!packet) return;
 
-  console.log(`1234`);
+  
 
 
   //updateFilterOptions();
@@ -3414,7 +3413,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log(`hello123`);
             if (virtualScroll)
             {
-                console.log(`123456`); 
+                 
                 virtualScroll.addfilersData();
             }
         });

@@ -121,6 +121,7 @@ class PacketAnalyzer {
     const phr = buffer[pos];
     layer.fields.push({
       name: "PHY Header",
+      type: 'expandable',
       value: `0x${phr.toString(16).padStart(2, "0").toUpperCase()}`,
       subfields: [
         {
@@ -138,49 +139,65 @@ class PacketAnalyzer {
 
     // Frame Control
     const fc = buffer.readUInt16LE(pos);
+    const fcBin = fc.toString(2).padStart(16, "0");
     layer.fields.push({
       name: "Frame Control",
+      type: "expandable",
       value: `0x${fc.toString(16).padStart(4, "0").toUpperCase()}`,
       subfields: [
         {
           name: "Frame Type",
           value: fc & 0x07,
           description: ["Beacon", "Data", "Ack", "Command"][fc & 0x07],
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 13, 15)
         },
         {
           name: "Security Enabled",
           value: (fc >> 3) & 1,
           description: (fc >> 3) & 1 ? "true" : "false",
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 12, 12)
         },
         {
           name: "Frame Pending",
           value: (fc >> 4) & 1,
           description: (fc >> 4) & 1 ? "true" : "false",
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 11, 11)
         },
         {
           name: "Ack Required",
           value: (fc >> 5) & 1,
           description: (fc >> 5) & 1 ? "true" : "false",
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 10, 10)
         },
         {
           name: "PAN ID Compression",
           value: (fc >> 6) & 1,
           description: (fc >> 6) & 1 ? "true" : "false",
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 9, 9)
         },
         {
           name: "Frame Version",
           value: (fc >> 12) & 0x03,
           description: ["2003", "2006", "2015", "Reserved"][(fc >> 12) & 0x03],
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 2, 3)
+        },
+        {
+          name: "Reserved",
+          value: (fc >> 7) & 0x07,
+          description: `0x${((fc >> 7) & 0x07).toString(16).toUpperCase().padStart(2, '0')}`,
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 6, 8)
         },
         {
           name: "Dest Addr Mode",
           value: (fc >> 10) & 0x03,
           description: ["None", "Reserved", "Short", "Ext"][(fc >> 10) & 0x03],
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 4, 5)
         },
         {
           name: "Src Addr Mode",
           value: (fc >> 14) & 0x03,
           description: ["None", "Reserved", "Short", "Ext"][(fc >> 14) & 0x03],
+          binaryDisplay: subfieldBinaryDisplay(fcBin, 0, 1)
         },
       ],
     });
@@ -271,22 +288,26 @@ class PacketAnalyzer {
       fields: [],
     };
     const securityControl = buffer[pos];
+    const scBin = securityControl.toString(2).padStart(8, "0");
     const securityLevel = securityControl & 0x07;
     const keyIdMode = (securityControl >> 3) & 0x03;
 
     layer.fields.push({
       name: "Security Control",
+      type: "expandable",
       value: `0x${securityControl.toString(16).padStart(2, "0").toUpperCase()}`,
       subfields: [
         {
           name: "Security Level",
           value: securityLevel,
           description: this.getSecurityLevelDescription(securityLevel),
+          binaryDisplay: subfieldBinaryDisplay(scBin, 5, 7, 4)
         },
         {
           name: "Key Identifier Mode",
           value: keyIdMode,
           description: this.getKeyIdModeDescription(keyIdMode),
+          binaryDisplay: subfieldBinaryDisplay(scBin, 3, 4, 4)
         },
       ],
     });
@@ -348,7 +369,6 @@ class PacketAnalyzer {
 
         // Hiển thị nhị phân dispatch byte chia nhóm 4 bit
         const dispatchBin = dispatch.toString(2).padStart(8, '0');
-        const dispatchBinGrouped = dispatchBin.replace(/(.{4})/g, '$1 ').trim();
 
         return {
             name: '6lowpan',
@@ -358,12 +378,12 @@ class PacketAnalyzer {
                     name: 'Dispatch Byte',
                     type: 'expandable',
                     value: `0x${dispatch.toString(16).padStart(2, '0').toUpperCase()}`,
-                    binaryDisplay: dispatchBinGrouped,
                     subfields: [
                         {
                             name: 'Hops Left',
-                            value: `0x${hopsLeft.toString(16).toUpperCase()}`,
-                            description: `${parseInt(dispatchBin.slice(4, 8), 2)}`
+                            value: `0x${hopsLeft.toString(16).padStart(2, '0').toUpperCase()}`,
+                            description: `${parseInt(dispatchBin.slice(4, 8), 2)}`,
+                            binaryDisplay: subfieldBinaryDisplay(dispatchBin, 4, 7, 4)
                         }
                     ]
                 },
@@ -376,64 +396,83 @@ class PacketAnalyzer {
 
     // 2. Fragmentation Header (11xxxxxx)
     // Fragmentation Header: FRAG1 (11000xxx, 0xC0–0xDF)
-    if ((dispatch & 0xF8) === 0xC0 && buffer.length >= pos + 4) {
-        const fragCtrl = (dispatch << 8) | buffer[pos + 1];
-        const fragCtrlBin = fragCtrl.toString(2).padStart(16, '0');
-        const fragCtrlBinGrouped = fragCtrlBin.replace(/(.{4})/g, '$1 ').trim();
-        const fragmentType = (fragCtrl >> 13) & 0x7;
-        const fragmentTypeDesc = fragmentType === 6 ? 'First fragment (24)' : 'Unknown';
-        const datagramSize = fragCtrl & 0x1FFF;
-        const datagramTag = (buffer[pos + 2] << 8) | buffer[pos + 3];
+if ((dispatch & 0xF8) === 0xC0 && buffer.length >= pos + 4) {
+    const fragCtrl = (dispatch << 8) | buffer[pos + 1];
+    const fragCtrlBin = fragCtrl.toString(2).padStart(16, '0');
+    // Fragment Type: 5 bit đầu (0-4), Datagram Size: 11 bit tiếp theo (5-15)
+    const fragmentType = (fragCtrl >> 11) & 0x1F;
+    const fragmentTypeDesc = fragmentType === 24 ? 'First fragment (FRAG1)' : 'Unknown';
+    const datagramSize = fragCtrl & 0x7FF; // 11 bit cuối
+    const datagramTag = (buffer[pos + 2] << 8) | buffer[pos + 3];
 
-        return {
-            name: '6lowpan',
-            totalBytes: 4,
-            fields: [
-                {
-                    name: 'Fragment Control',
-                    type: 'expandable',
-                    value: `0x${fragCtrl.toString(16).toUpperCase()}`,
-                    binaryDisplay: fragCtrlBinGrouped,
-                    subfields: [
-                        { name: 'Fragment Type', value: fragmentType, description: fragmentTypeDesc },
-                        { name: 'Datagram Size', value: datagramSize }
-                    ]
-                },
-                { name: 'Datagram Tag', value: `0x${datagramTag.toString(16).toUpperCase()}` }
-            ]
-        };
-    }
+    return {
+        name: '6lowpan',
+        totalBytes: 4,
+        fields: [
+            {
+                name: 'Fragment Control',
+                type: 'expandable',
+                value: `0x${fragCtrl.toString(16).toUpperCase()}`,
+                subfields: [
+                    { 
+                        name: 'Fragment Type',
+                        value: fragmentType,
+                        description: fragmentTypeDesc,
+                        binaryDisplay: subfieldBinaryDisplay(fragCtrlBin, 0, 4)
+                    },
+                    {
+                        name: 'Datagram Size', 
+                        value: datagramSize,
+                        description: `0x${datagramSize.toString(16).toUpperCase().padStart(3, '0')}`,
+                        binaryDisplay: subfieldBinaryDisplay(fragCtrlBin, 5, 15)
+                    }
+                ]
+            },
+            { name: 'Datagram Tag', value: `0x${datagramTag.toString(16).toUpperCase().padStart(4, '0')}` }
+        ]
+    };
+}
 
-    // Fragmentation Header: FRAGN (11100xxx, 0xE0–0xFF)
-    if ((dispatch & 0xF8) === 0xE0 && buffer.length >= pos + 5) {
-        const fragCtrl = (dispatch << 8) | buffer[pos + 1];
-        const fragCtrlBin = fragCtrl.toString(2).padStart(16, '0');
-        const fragCtrlBinGrouped = fragCtrlBin.replace(/(.{4})/g, '$1 ').trim();
-        const fragmentType = (fragCtrl >> 13) & 0x7;
-        const fragmentTypeDesc = fragmentType === 7 ? 'Next fragment (28)' : 'Unknown';
-        const datagramSize = fragCtrl & 0x1FFF;
-        const datagramTag = (buffer[pos + 2] << 8) | buffer[pos + 3];
-        const datagramOffset = buffer[pos + 4];
+// Fragmentation Header: FRAGN (11100xxx, 0xE0–0xFF)
+if ((dispatch & 0xF8) === 0xE0 && buffer.length >= pos + 5) {
+    const fragCtrl = (dispatch << 8) | buffer[pos + 1];
+    const fragCtrlBin = fragCtrl.toString(2).padStart(16, '0');
+    // Fragment Type: 5 bit đầu (0-4), Datagram Size: 11 bit tiếp theo (5-15)
+    const fragmentType = (fragCtrl >> 11) & 0x1F;
+    const fragmentTypeDesc = fragmentType === 28 ? 'Next fragment (FRAGN)' : 'Unknown';
+    const datagramSize = fragCtrl & 0x7FF; // 11 bit cuối
+    const datagramTag = (buffer[pos + 2] << 8) | buffer[pos + 3];
+    const datagramOffset = buffer[pos + 4];
 
-        return {
-            name: '6lowpan',
-            totalBytes: 5,
-            fields: [
-                {
-                    name: 'Fragment Control',
-                    type: 'expandable',
-                    value: `0x${fragCtrl.toString(16).toUpperCase()}`,
-                    binaryDisplay: fragCtrlBinGrouped,
-                    subfields: [
-                        { name: 'Fragment Type', value: fragmentType, description: fragmentTypeDesc },
-                        { name: 'Datagram Size', value: datagramSize }
-                    ]
-                },
-                { name: 'Datagram Tag', value: `0x${datagramTag.toString(16).toUpperCase()}` },
-                { name: 'Datagram Offset', value: datagramOffset }
-            ]
-        };
-    }
+    return {
+        name: '6lowpan',
+        totalBytes: 5,
+        fields: [
+            {
+                name: 'Fragment Control',
+                type: 'expandable',
+                value: `0x${fragCtrl.toString(16).toUpperCase()}`,
+                subfields: [
+                    { 
+                        name: 'Fragment Type',
+                        value: fragmentType,
+                        description: fragmentTypeDesc,
+                        binaryDisplay: subfieldBinaryDisplay(fragCtrlBin, 0, 4)
+                    },
+                    { 
+                        name: 'Datagram Size',
+                        value: datagramSize,
+                        description: `0x${datagramSize.toString(16).toUpperCase().padStart(3, '0')}`,
+                        binaryDisplay: subfieldBinaryDisplay(fragCtrlBin, 5, 15)
+                    }
+                ]
+            },
+            { name: 'Datagram Tag', value: `0x${datagramTag.toString(16).toUpperCase().padStart(4, '0')}` },
+            { name: 'Datagram Offset', value: datagramOffset }
+        ]
+    };
+}
+
 
 
     // 3. IPHC (011xxxxx, 0x60–0x7F)
@@ -449,20 +488,58 @@ class PacketAnalyzer {
         const dac = (iphc >> 2) & 0x01;
         const dam = iphc & 0x03;
 
+        const iphcBin = iphc.toString(2).padStart(16, '0');
+
         let fields = [{
             name: 'IPHC Base Encoding',
             type: 'expandable',
             value: `0x${iphc.toString(16).padStart(4, '0').toUpperCase()}`,
             subfields: [
-                { name: 'Traffic and Flow', value: tf },
-                { name: 'Next Header', value: nh },
-                { name: 'Hop Limit', value: hlim },
-                { name: 'Context ID', value: cid },
-                { name: 'Source Compression', value: sac },
-                { name: 'Source Address Mode', value: sam },
-                { name: 'Multicast Compression', value: m },
-                { name: 'Destination Compression', value: dac },
-                { name: 'Destination Address Mode', value: dam }
+                { 
+                    name: 'Traffic and Flow',
+                    value: tf,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 3, 4)
+                },
+                { 
+                    name: 'Next Header', 
+                    value: nh,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 5, 5)
+                },
+                { 
+                    name: 'Hop Limit', 
+                    value: hlim,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 6, 7) 
+                },
+                { 
+                    name: 'Context ID', 
+                    value: cid,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 8, 8)
+                },
+                { 
+                    name: 'Source Compression', 
+                    value: sac,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 9, 9)
+                },
+                { 
+                    name: 'Source Address Mode', 
+                    value: sam,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 10, 11)
+                },
+                { 
+                    name: 'Multicast Compression', 
+                    value: m,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 12, 12)
+                },
+                { 
+                    name: 'Destination Compression', 
+                    value: dac,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 13, 13)
+                },
+                { 
+                    name: 'Destination Address Mode', 
+                    value: dam,
+                    binaryDisplay: subfieldBinaryDisplay(iphcBin, 14, 15)
+                }
             ]
         }];
         pos += 2;
@@ -784,6 +861,27 @@ class PacketAnalyzer {
     };
     return descriptions[mode] || "Reserved";
   }
+}
+
+/**
+ * Tạo chuỗi hiển thị bit cho subfield, chia nhóm 4 bit, các bit không liên quan là dấu chấm.
+ * @param {string} bin - Chuỗi nhị phân (ví dụ: '1110011110111000', 16 ký tự).
+ * @param {number} from - Vị trí bit bắt đầu (0 là bit trái nhất, bên trái).
+ * @param {number} to - Vị trí bit kết thúc (0 <= from <= to < bin.length).
+ * @param {number} [group=4] - Số bit mỗi nhóm (mặc định 4).
+ * @returns {string} Chuỗi hiển thị bit, chia nhóm, ví dụ: '111. .... .... ....'
+ */
+function subfieldBinaryDisplay(bin, from, to, group = 4) {
+  // Đảm bảo bin đủ độ dài
+  const n = bin.length;
+  let arr = Array(n).fill('.');
+  for (let i = from; i <= to; i++) arr[i] = bin[i];
+  // Ghép lại thành chuỗi, chia nhóm group bit bằng dấu cách
+  let result = '';
+  for (let i = 0; i < n; i += group) {
+    result += arr.slice(i, i + group).join('') + ' ';
+  }
+  return result.trim();
 }
 
 module.exports = PacketAnalyzer;
